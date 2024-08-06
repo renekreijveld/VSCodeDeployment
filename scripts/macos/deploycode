@@ -1,0 +1,202 @@
+#!/bin/bash
+
+# deploycode -- A bash script to deploy code to a local or remote server
+#
+# Written by: René Kreijveld - email@renekreijveld.nl
+#
+# This program is free software; you may redistribute it and/or modify it.
+
+# For local deployment you can define the source and destination folders.
+# Fore remote deployment you can define the source and destination foldersas well as the SSH config to use.
+
+# For a local or remote deployment the script will show the last 9 commits and ask the user to choose one.
+# For a alllocal or allremote deployment all files in the repository will be copied to the destination folder.
+# In case of alllocal or allremote deployment an ignore list can be defined to exclude files or folders from the deployment.
+
+# This script is to be used combined with Task defined in Visual Studio Code.
+#
+# The syntax to use is: deploycode <mode> <environment_file>
+# <mode> is either: 'local', 'remote', 'alllocal', or 'allremote'
+# <environment_file> is the name of the configuration file in ~/.config/deploycode
+
+# <environment_file> config files should be saved in the ~/.config/deploycode folder.
+
+# For local deployment, the <environment_file> should be setup as follows:
+# The file must always start with the line #!/bin/bash
+# The following variables must be defined:
+# LOCAL_REPO_PATH="/path/to/local/repo"
+# LOCAL_PATH="/path/to/local/folder" where the files will be copied to
+# FILES_TO_IGNORE=( ".git" ".gitignore" ".vscode" ) # Add more files or folders to ignore as needed
+
+# An example config file for local deployment could be:
+
+# #!/bin/bash
+# 
+# LOCAL_REPO_PATH="/Users/your_username/dev/repositories/my_project"
+# LOCAL_PATH="/Users/your_username/dev/sites/my_website"
+# FILES_TO_IGNORE=(
+#     ".git"
+#     ".gitignore"
+#     # Add more files or folders to ignore as needed
+# )
+
+# For local deployment, the <environment_file> should be setup as follows:
+# The file must always start with the line #!/bin/bash
+# The following variables must be defined:
+# LOCAL_REPO_PATH="/path/to/local/repo"
+# SSH_CONFIG="ssh_config_name"
+# REMOTE_PATH="/path/to/folder/on/remote/server"
+
+# An example config file for a remote deployment could be:
+
+# #!/bin/bash
+# 
+# LOCAL_REPO_PATH="/Users/your_username/dev/repositories/my_project"
+# SSH_CONFIG="my_server"
+# REMOTER_PATH="/Users/your_username/dev/sites/my_website"
+# FILES_TO_IGNORE=(
+#     ".git"
+#     ".gitignore"
+#     # Add more files or folders to ignore as needed
+# )
+
+# Get commandline options
+DEPLOY_MODE=$1
+ENVIRONMENT=$2
+
+# Check for valid DEPLOY_MODE
+case "$DEPLOY_MODE" in
+  local|remote|alllocal|allremote)
+    # Valid DEPLOY_MODE, do nothing
+    ;;
+  *)
+    echo "Error: DEPLOY_MODE must be either 'local', 'remote', 'alllocal', or 'allremote'."
+    exit 1
+    ;;
+esac
+
+[ -z "$ENVIRONMENT" ] && { echo "Error: no config file specified."; exit 1; }
+
+[ ! -e ~/.config/deploycode/$ENVIRONMENT ] && { echo "Error: $ENVIRONMENT config file not found."; exit 1; }
+
+# Load configuration variables
+. ~/.config/deploycode/$ENVIRONMENT
+
+# Function to check if a file/folder is in the ignore list
+should_ignore() {
+  local ITEM=$1
+  for IGNORE in "${FILES_TO_IGNORE[@]}"; do
+    [[ "$ITEM" == "$IGNORE" || "$ITEM" == "$IGNORE/"* ]] && return 0
+  done
+  return 1
+}
+
+# Function to deploy to a local folder
+deploy_local() {
+  # Upload the changed files via SFTP
+  echo "Copy files:"
+  for FILE in $CHANGED_FILES; do
+    echo "- $FILE"
+    cp "$LOCAL_REPO_PATH/$FILE" "$LOCAL_PATH/$FILE"
+  done
+
+  # Remove deleted files from the remote server
+  echo "Delete files:"
+  for FILE in $DELETED_FILES; do
+    echo "- $FILE"
+    rm -f "$LOCAL_PATH/$FILE"
+  done
+}
+
+# Function to deploy to a remote server
+deploy_remote() {
+  # Upload the changed files via SFTP
+  echo "Upload files:"
+  for FILE in $CHANGED_FILES; do
+    echo "- $FILE"
+    # Secure copy the file to the remote server
+    scp "$LOCAL_REPO_PATH/$FILE" "$SSH_CONFIG:$REMOTE_PATH/$FILE" > /dev/null
+    # Change the permissions of the file on the remote server
+    ssh "$SSH_CONFIG" "chmod 0644 $REMOTE_PATH/$FILE"
+  done
+
+  # Remove deleted files from the remote server
+  echo "Delete files:"
+  for FILE in $DELETED_FILES; do
+    echo "- $FILE"
+    # Secure shell to the remote server and remove the file
+    ssh "$SSH_CONFIG" "rm -f $REMOTE_PATH/$FILE"
+  done
+}
+
+# Function to deploy all files in a repository to a local folder
+deploy_all_local() {
+  find "$LOCAL_REPO_PATH" -mindepth 1 -maxdepth 1 | while read -r ITEM; do
+    ITEM=$(basename "$ITEM")
+    if ! should_ignore "$ITEM"; then
+      echo "- $ITEM"
+      # Copy file or folder to the local path
+      cp -R "$LOCAL_REPO_PATH/$ITEM" "$LOCAL_PATH"
+    fi
+  done
+}
+
+# Function to deploy all files in a repository to a remote server
+deploy_all_remote() {
+  find "$LOCAL_REPO_PATH" -mindepth 1 -maxdepth 1 | while read -r ITEM; do
+    ITEM=$(basename "$ITEM")
+    if ! should_ignore "$ITEM"; then
+      echo "- $ITEM"
+      # Secure copy the file or folder to the remote server
+      scp -r "$LOCAL_REPO_PATH/$ITEM" "$SSH_CONFIG:$REMOTE_PATH" > /dev/null 2>&1
+    fi
+  done
+}
+
+# Go to the local repository path
+cd $LOCAL_REPO_PATH
+
+# If deploy mode is 'local' or 'remote', show the last 9 commits and ask the user to choose one
+if [ "$DEPLOY_MODE" == "local" ] || [ "$DEPLOY_MODE" == "remote" ]; then
+  # Show the last 9 commits
+  echo "Last 9 commits (most recent first):"
+  IFS=$'\n' read -d '' -r -a commits < <(git log -n 9 --pretty=format:"%h %s" && printf '\0')
+
+  for i in "${!commits[@]}"; do
+    echo "$((i + 1)). ${commits[$i]}"
+  done
+
+  # Ask the user to choose a commit
+  echo " "
+  echo "Enter the number of the commit to deploy (1-9). Press Ctrl+C to cancel."
+  read -r COMMIT_NUMBER
+
+  # Get the commit hash for the chosen commit
+  CHOSEN_HASH=$(echo "${commits[$((COMMIT_NUMBER - 1))]}" | awk '{print $1}')
+
+  # Get the list of changed files in the chosen commit (excluding deletions)
+  CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r "$CHOSEN_HASH" --diff-filter=ACMRT)
+
+  # Get the list of deleted files in the chosen commit
+  DELETED_FILES=$(git diff-tree --no-commit-id --name-only -r "$CHOSEN_HASH" --diff-filter=D)
+fi
+
+echo "Deploying to $ENVIRONMENT..."
+
+# Execure the deployment
+case "$DEPLOY_MODE" in
+  local)
+    deploy_local
+    ;;
+  remote)
+    deploy_remote
+    ;;
+  alllocal)
+    deploy_all_local
+    ;;
+  *)
+    deploy_all_remote
+    ;;
+esac
+
+echo "Deployment completed."
