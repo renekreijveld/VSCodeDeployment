@@ -1,0 +1,39 @@
+#!/bin/bash
+
+ENVIRONMENT=$1
+FILE=$2
+
+echo "Deploying to $ENVIRONMENT..."
+
+if [ -z "$ENVIRONMENT" ]; then
+  echo "Error: no config file specified."
+  exit 1
+fi
+
+if [ -z "$FILE" ]; then
+  echo "Error: no file to copy speciied."
+  exit 1
+fi
+
+# Check if the environment config file exists
+if [ ! -e ~/bin/.config/$ENVIRONMENT ]; then
+  echo "Error: $ENVIRONMENT config file not found."
+  exit 1
+fi
+
+# Load configuration variables
+. ~/bin/.config/${ENVIRONMENT}
+
+# Remove the LOCAL_REPO_PATH part from FILE
+RELATIVE_FILE=${FILE#$LOCAL_REPO_PATH/}
+
+# Determine destination path, maintaining the relative path
+DEST_PATH="$LOCAL_PATH/$RELATIVE_FILE"
+
+# Create the destination directory if it doesn't exist
+mkdir -p "$(dirname "$DEST_PATH")"
+
+echo "$RELATIVE_FILE"
+cp "$FILE" "$DEST_PATH"
+
+echo "Local file copy completed."
