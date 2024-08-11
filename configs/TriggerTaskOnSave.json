@@ -1,0 +1,18 @@
+"triggerTaskOnSave.tasks": {
+    "Copy Newgreement to Local": [
+        "*.css",
+        "*.html",
+        "*.ico",
+        "*.ini",
+        "*.jpeg",
+        "*.jpg",
+        "*.js",
+        "*.md",
+        "*.php",
+        "*.png",
+        "*.sql",
+        "*.svg",
+        "*.woff2",
+        "*.xml",
+    ]
+},
